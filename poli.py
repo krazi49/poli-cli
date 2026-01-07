@@ -118,17 +118,21 @@ def run_poli_process(command, success_msg):
         os.close(slave_fd)
         
         with os.fdopen(master_fd, 'r') as pipe:
-            for line in pipe:
-                error_log.append(line)
-                pct_match = re.search(r'(\d+)%', line)
-                if pct_match:
-                    current_pct = int(pct_match.group(1))
-                
-                keys = ["cloning", "building", "installing", "checking", "downloading", "removing", "upgrading"]
-                if any(k in line.lower() for k in keys):
-                    current_status = line.strip().split('::')[-1].split('..')[0].strip()
+            try:
+                for line in pipe:
+                    error_log.append(line)
+                    pct_match = re.search(r'(\d+)%', line)
+                    if pct_match:
+                        current_pct = int(pct_match.group(1))
+                    
+                    keys = ["cloning", "building", "installing", "checking", "downloading", "removing", "upgrading"]
+                    if any(k in line.lower() for k in keys):
+                        current_status = line.strip().split('::')[-1].split('..')[0].strip()
 
-                draw_poli_ui(current_status, current_pct, start_time)
+                    draw_poli_ui(current_status, current_pct, start_time)
+            except OSError:
+                # This catches the Errno 5 when pacman finishes and closes the pty
+                pass
 
         process.wait()
         sys.stdout.write(f"\r\033[K\n\r\033[K\033[A{SHOW_CURSOR}")
@@ -136,7 +140,7 @@ def run_poli_process(command, success_msg):
         if process.returncode == 0:
             print(f"\n{GREEN}✅ {success_msg} ({int(time.time() - start_time)}s){RESET}")
         else:
-            print(f"\n{RED}{BOLD}[!] Package couldn't be assembled. This error might help:!{RESET}")
+            print(f"\n{RED}{BOLD}[!] Couldn't assemble the package, this error may help:{RESET}")
             for err_line in error_log[-5:]:
                 print(f" {RED}»{RESET} {err_line.strip()}")
     except KeyboardInterrupt:
