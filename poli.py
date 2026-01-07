@@ -140,7 +140,7 @@ def run_poli_process(command, success_msg):
         if process.returncode == 0:
             print(f"\n{GREEN}✅ {success_msg} ({int(time.time() - start_time)}s){RESET}")
         else:
-            print(f"\n{RED}{BOLD}[!] Couldn't assemble the package, this error may help:{RESET}")
+            print(f"\n{RED}{BOLD}[!] Couldn't do what you asked, sorry. This error may help:{RESET}")
             for err_line in error_log[-5:]:
                 print(f" {RED}»{RESET} {err_line.strip()}")
     except KeyboardInterrupt:
