@@ -96,7 +96,8 @@ def get_package_info(packages):
     print(f"{CYAN}Checking what you'll need...{RESET}")
     cmd = ["pacman", "-Si"] + packages
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0: return False
+    if result.returncode != 0: 
+        return False
 
     name_match = re.search(r'^Name\s+:\s+(.+)', result.stdout, re.M)
     size_match = re.search(r'^Download Size\s+:\s+(.+)', result.stdout, re.M)
@@ -158,7 +159,7 @@ def run_poli_process(command, success_msg, is_install=False):
                 print(f"\n{RED}{BOLD}[!] Assembly failed!{RESET}")
                 print(f"{YELLOW}I couldn't install the package. Here's the last thing I saw:{RESET}")
                 print("-" * 40)
-                # Show the last 5 lines of the error log
+                # Show the last 5 lines of the error log to avoid flooding the screen
                 for err_line in error_log[-5:]:
                     print(f" {RED}»{RESET} {err_line.strip()}")
                 print("-" * 40)
@@ -182,8 +183,8 @@ def main():
             print(f"{CYAN}Checking your system for orphans...{RESET}")
             run_poli_process(["-Syu"], "System up to date!")
             # Check for orphans after
-            orphans = subprocess.run(["pacman", "-Qqdt"], capture_output=True, text=True).stdout
-            if orphans:
+            orphans_check = subprocess.run(["pacman", "-Qqdt"], capture_output=True, text=True)
+            if orphans_check.stdout:
                 print(f"\n{YELLOW}I found unused packages (orphans). Run 'poli orphans' to find them a home.{RESET}")
         else:
             print(f"{YELLOW}Update cancelled, so you can check the news.{RESET}")
