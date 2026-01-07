@@ -56,8 +56,8 @@ def check_lock():
 def show_help():
     print(rf"{CYAN}{BOLD}")
     print(r"  ____  ____  __    ____ ")
-    print(r" / __ \/ __ \/ /   /  _/")
-    print(r" / /_/ / / / / /    / /  ")
+    print(r" / __ \/ __ \/ /    /  _/")
+    print(r" / /_/ / / / / /     / /  ")
     print(r" / ____/ /_/ / /____/ /   ")
     print(r"/_/    \____/_____/___/   CLI")
     print(f"{RESET}")
@@ -96,10 +96,13 @@ def get_package_info(packages):
     print(f"{CYAN}Checking what you'll need...{RESET}")
     cmd = ["pacman", "-Si"] + packages
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0: return True
+    if result.returncode != 0: return False
 
-    name = re.search(r'^Name\s+:\s+(.+)', result.stdout, re.M).group(1)
-    size = re.search(r'^Download Size\s+:\s+(.+)', result.stdout, re.M).group(1)
+    name_match = re.search(r'^Name\s+:\s+(.+)', result.stdout, re.M)
+    size_match = re.search(r'^Download Size\s+:\s+(.+)', result.stdout, re.M)
+    
+    name = name_match.group(1) if name_match else "Unknown"
+    size = size_match.group(1) if size_match else "Unknown"
     
     print(f"\n{BOLD}Package:{RESET} {name} | {BOLD}Download size:{RESET} {YELLOW}{size}{RESET}")
     confirm = input(f"{BOLD}Should I start? [Y/n]: {RESET}").lower()
@@ -110,14 +113,15 @@ def run_poli_process(command, success_msg, is_install=False):
     check_lock()
     if verbose:
         sys.argv.remove("--verbose")
-    full_cmd = ["sudo", "pacman", "--noconfirm"] + command
     
     if is_install and not get_package_info(command[1:]): return
 
+    full_cmd = ["sudo", "pacman", "--noconfirm"] + command
     sys.stdout.write(HIDE_CURSOR)
     start_time = time.time()
     current_pct = 0
     current_status = "Starting..."
+    error_log = []
 
     try:
         if verbose:
@@ -125,41 +129,44 @@ def run_poli_process(command, success_msg, is_install=False):
             print(f"{YELLOW}>>> You'll see everything. Verbose mode is activated...{RESET}")
             subprocess.run(full_cmd)
         else:
-
-        # forcing pacman to output progress EVEN while piped! how crazy is that guys
-        process = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        
-        for line in process.stdout:
-            # parse percentage
-            pct_match = re.search(r'(\d+)%', line)
-            if pct_match:
-                current_pct = int(pct_match.group(1))
+            # forcing pacman to output progress EVEN while piped!
+            process = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             
-            # parse status keywords
-            keys = ["cloning", "building", "installing", "checking", "downloading"]
-            if any(k in line.lower() for k in keys):
-                current_status = line.strip().split('::')[-1].split('..')[0].strip()
+            for line in process.stdout:
+                error_log.append(line)
+                # parse percentage
+                pct_match = re.search(r'(\d+)%', line)
+                if pct_match:
+                    current_pct = int(pct_match.group(1))
+                
+                # parse status keywords
+                keys = ["cloning", "building", "installing", "checking", "downloading"]
+                if any(k in line.lower() for k in keys):
+                    current_status = line.strip().split('::')[-1].split('..')[0].strip()
 
-            draw_poli_ui(current_status, current_pct, start_time)
+                draw_poli_ui(current_status, current_pct, start_time)
 
-        process.wait()
-        # clear the lines when it's done
-        sys.stdout.write(f"\r\033[K\n\r\033[K\033[A{SHOW_CURSOR}")
-        
-        if process.returncode == 0:
-            total_time = int(time.time() - start_time)
-            print(f"\n{GREEN}✅ {success_msg} ({total_time}s){RESET}")
-      else:
-            # --- ERROR DISPLAY SECTION ---
-            print(f"\n{RED}{BOLD}[!] Assembly failed!{RESET}")
-            print(f"{YELLOW}I couldn't install the package. Here's the last thing I saw:{RESET}")
-            print("-" * 40)
-            # Show the last 5 lines of the error log to avoid flooding the screen
-            for err_line in error_log[-5:]:
-                print(f" {RED}»{RESET} {err_line.strip()}")
-            print("-" * 40)
-            print(f"{CYAN}Tip:{RESET} Check your internet or if the package name is correct.")    except KeyboardInterrupt:
+            process.wait()
+            # clear the lines when it's done
+            sys.stdout.write(f"\r\033[K\n\r\033[K\033[A{SHOW_CURSOR}")
+            
+            if process.returncode == 0:
+                total_time = int(time.time() - start_time)
+                print(f"\n{GREEN}✅ {success_msg} ({total_time}s){RESET}")
+            else:
+                # --- ERROR DISPLAY SECTION ---
+                print(f"\n{RED}{BOLD}[!] Assembly failed!{RESET}")
+                print(f"{YELLOW}I couldn't install the package. Here's the last thing I saw:{RESET}")
+                print("-" * 40)
+                # Show the last 5 lines of the error log
+                for err_line in error_log[-5:]:
+                    print(f" {RED}»{RESET} {err_line.strip()}")
+                print("-" * 40)
+                print(f"{CYAN}Tip:{RESET} Check your internet or if the package name is correct.")
+    except KeyboardInterrupt:
         print(f"\n{SHOW_CURSOR}{BOLD}[!] Stopped.{RESET}")
+    finally:
+        sys.stdout.write(SHOW_CURSOR)
 
 def main():
     if len(sys.argv) < 2:
@@ -170,7 +177,7 @@ def main():
     if action == "install":
         run_poli_process(["-S"] + sys.argv[2:], "Your package is ready!", is_install=True)
     elif action == "update":
-        # New: Check news BEFORE starting the update process
+        # Check news BEFORE starting the update process
         if check_arch_news():
             print(f"{CYAN}Checking your system for orphans...{RESET}")
             run_poli_process(["-Syu"], "System up to date!")
@@ -179,7 +186,7 @@ def main():
             if orphans:
                 print(f"\n{YELLOW}I found unused packages (orphans). Run 'poli orphans' to find them a home.{RESET}")
         else:
-            print(f"{YELLOW}Update cancelled, so you can check the news.{RESET}")t if needed.")
+            print(f"{YELLOW}Update cancelled, so you can check the news.{RESET}")
     elif action == "orphans":
         subprocess.run("sudo pacman -Rs $(pacman -Qqdt)", shell=True)
     else:
