@@ -50,7 +50,7 @@ def check_arch_news():
 
 def check_lock():
     if os.path.isfile("/var/lib/pacman/db.lck"):
-        print(f"{YELLOW}[!] Stop! Poli's locked by something else. Try and check if any pacman processes are being used. If you're sure there aren't, remove the db.lck file with "rm /var/lib/pacman/db.lck"{RESET}")
+        print(f"{YELLOW}[!] Stop! Poli's locked by something else. Try and check if any pacman processes are being used.{RESET}")
         sys.exit(1)
 
 def show_help():
