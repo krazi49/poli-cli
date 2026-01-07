@@ -29,12 +29,10 @@ def check_arch_news():
         with urllib.request.urlopen(news_url, timeout=5) as response:
             tree = ET.parse(response)
             root = tree.getroot()
-            # Get the latest news item
             latest_item = root.find(".//item")
             title = latest_item.find("title").text
             link = latest_item.find("link").text
             
-            # Common keywords indicating a system-breaking change
             if any(word in title.lower() for word in ["intervention", "required", "manual", "breaking"]):
                 print(f"\n{RED}{BOLD}⚠️  ATTENTION: IMPORTANT NEWS DETECTED{RESET}")
                 print(f"{YELLOW}Title: {title}{RESET}")
@@ -63,18 +61,14 @@ def show_help():
     print(f"{RESET}")
     print(f"{YELLOW}{BOLD}I don't know what to do. Try and use these commands instead.{RESET}")
     print(f"  {CYAN}update{RESET}          - Updates your packages and checks for any orphans")
+    print(f"  {CYAN}search install{RESET}  - Finds packages you want and installs them")
+    print(f"  {CYAN}search{RESET}          - Queries the AUR for packages")
     print(f"  {CYAN}install{RESET}         - Installs what you want")
-    print(f"  {CYAN}search install{RESET}  - Search and pick for what you want")
     print(f"  {CYAN}orphans{RESET}         - Clean unused dependencies")
+    print(f"  {CYAN}uninstall{RESET}       - Removes Poli from your system")
 
 def draw_poli_ui(status, percent, start_time):
-    """
-    Line 1: Spinner + Action
-    Line 2: Speed Bar + ETA
-    """
     elapsed = time.time() - start_time
-    
-    # calculate the ETA based on percentage
     if percent > 0:
         total_est = elapsed / (percent / 100)
         remaining = total_est - elapsed
@@ -83,21 +77,19 @@ def draw_poli_ui(status, percent, start_time):
     else:
         eta_str = "--:--"
 
-    # create a progress bar
     bar_anim = ["░▒▓", "▒▓▒", "▓▒░", "█▓▒"]
     speed_bar = bar_anim[int(time.time() * 5) % 4] * 4
 
-    sys.stdout.write(f"\r{CYAN}{next(SPINNER)} Poli is assembling packages...{RESET} {BOLD}↳{RESET} {status[:40]}\033[K\n")
+    sys.stdout.write(f"\r{CYAN} {next(SPINNER)} poli is assembling packages...{RESET} {BOLD}↳{RESET} {status[:40]}\033[K\n")
     sys.stdout.write(f"\r{YELLOW}[{speed_bar}] {percent}% {RESET} | {CYAN}Finished in:{RESET} {eta_str}\033[K")
-    sys.stdout.write("\033[A") # move back up one line
+    sys.stdout.write("\033[A")
     sys.stdout.flush()
 
 def get_package_info(packages):
     print(f"{CYAN}Checking what you'll need...{RESET}")
     cmd = ["pacman", "-Si"] + packages
     result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0: 
-        return False
+    if result.returncode != 0: return False
 
     name_match = re.search(r'^Name\s+:\s+(.+)', result.stdout, re.M)
     size_match = re.search(r'^Download Size\s+:\s+(.+)', result.stdout, re.M)
@@ -126,21 +118,16 @@ def run_poli_process(command, success_msg, is_install=False):
 
     try:
         if verbose:
-            # if user really wants verbose, they will get it. showing raw output
             print(f"{YELLOW}>>> You'll see everything. Verbose mode is activated...{RESET}")
             subprocess.run(full_cmd)
         else:
-            # forcing pacman to output progress EVEN while piped!
             process = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            
             for line in process.stdout:
                 error_log.append(line)
-                # parse percentage
                 pct_match = re.search(r'(\d+)%', line)
                 if pct_match:
                     current_pct = int(pct_match.group(1))
                 
-                # parse status keywords
                 keys = ["cloning", "building", "installing", "checking", "downloading"]
                 if any(k in line.lower() for k in keys):
                     current_status = line.strip().split('::')[-1].split('..')[0].strip()
@@ -148,22 +135,15 @@ def run_poli_process(command, success_msg, is_install=False):
                 draw_poli_ui(current_status, current_pct, start_time)
 
             process.wait()
-            # clear the lines when it's done
             sys.stdout.write(f"\r\033[K\n\r\033[K\033[A{SHOW_CURSOR}")
             
             if process.returncode == 0:
                 total_time = int(time.time() - start_time)
                 print(f"\n{GREEN}✅ {success_msg} ({total_time}s){RESET}")
             else:
-                # --- ERROR DISPLAY SECTION ---
                 print(f"\n{RED}{BOLD}[!] Assembly failed!{RESET}")
-                print(f"{YELLOW}I couldn't install the package. Here's the last thing I saw:{RESET}")
-                print("-" * 40)
-                # Show the last 5 lines of the error log to avoid flooding the screen
                 for err_line in error_log[-5:]:
                     print(f" {RED}»{RESET} {err_line.strip()}")
-                print("-" * 40)
-                print(f"{CYAN}Tip:{RESET} Check your internet or if the package name is correct.")
     except KeyboardInterrupt:
         print(f"\n{SHOW_CURSOR}{BOLD}[!] Stopped.{RESET}")
     finally:
@@ -178,11 +158,9 @@ def main():
     if action == "install":
         run_poli_process(["-S"] + sys.argv[2:], "Your package is ready!", is_install=True)
     elif action == "update":
-        # Check news BEFORE starting the update process
         if check_arch_news():
             print(f"{CYAN}Checking your system for orphans...{RESET}")
             run_poli_process(["-Syu"], "System up to date!")
-            # Check for orphans after
             orphans_check = subprocess.run(["pacman", "-Qqdt"], capture_output=True, text=True)
             if orphans_check.stdout:
                 print(f"\n{YELLOW}I found unused packages (orphans). Run 'poli orphans' to find them a home.{RESET}")
@@ -190,6 +168,13 @@ def main():
             print(f"{YELLOW}Update cancelled, so you can check the news.{RESET}")
     elif action == "orphans":
         subprocess.run("sudo pacman -Rs $(pacman -Qqdt)", shell=True)
+    elif action == "uninstall":
+        print(f"{RED}{BOLD}Poli: Disassembling...{RESET}")
+        if os.path.exists("/usr/local/bin/poli"):
+            subprocess.run(["sudo", "rm", "/usr/local/bin/poli"])
+            print(f"{GREEN}✅ poli has been removed from your system. See you some other time...{RESET}")
+        else:
+            print(f"{YELLOW}[!] poli wasn't found in /usr/local/bin/.{RESET}")
     else:
         show_help()
 
