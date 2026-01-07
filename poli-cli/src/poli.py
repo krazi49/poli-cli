@@ -106,7 +106,10 @@ def get_package_info(packages):
     return confirm in ['', 'y', 'yes']
 
 def run_poli_process(command, success_msg, is_install=False):
+    verbose = "--verbose" in sys.argv
     check_lock()
+    if verbose:
+        sys.argv.remove("--verbose")
     full_cmd = ["sudo", "pacman", "--noconfirm"] + command
     
     if is_install and not get_package_info(command[1:]): return
@@ -117,6 +120,12 @@ def run_poli_process(command, success_msg, is_install=False):
     current_status = "Starting..."
 
     try:
+        if verbose:
+            # if user really wants verbose, they will get it. showing raw output
+            print(f"{YELLOW}>>> You'll see everything. Verbose mode is activated...{RESET}")
+            subprocess.run(full_cmd)
+        else:
+
         # forcing pacman to output progress EVEN while piped! how crazy is that guys
         process = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         
@@ -142,7 +151,7 @@ def run_poli_process(command, success_msg, is_install=False):
             print(f"\n{GREEN}✅ {success_msg} ({total_time}s){RESET}")
       else:
             # --- ERROR DISPLAY SECTION ---
-            print(f"\n{RED}{BOLD}[!] Assembly Failed{RESET}")
+            print(f"\n{RED}{BOLD}[!] Assembly failed!{RESET}")
             print(f"{YELLOW}I couldn't install the package. Here's the last thing I saw:{RESET}")
             print("-" * 40)
             # Show the last 5 lines of the error log to avoid flooding the screen
