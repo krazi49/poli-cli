@@ -6,6 +6,8 @@ import re
 import shutil
 import itertools
 import time
+import urllib.request
+import xml.etree.ElementTree as ET
 
 # colours because you need them in life
 CYAN = "\033[36m"
@@ -18,6 +20,33 @@ HIDE_CURSOR = "\033[?25l"
 SHOW_CURSOR = "\033[?25h"
 
 SPINNER = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+
+def check_arch_news():
+    """Fetches the latest news from Arch Linux to check for manual interventions."""
+    print(f"{CYAN}📡 Checking Arch Linux News for manual interventions...{RESET}")
+    news_url = "https://archlinux.org/feeds/news/"
+    try:
+        with urllib.request.urlopen(news_url, timeout=5) as response:
+            tree = ET.parse(response)
+            root = tree.getroot()
+            # Get the latest news item
+            latest_item = root.find(".//item")
+            title = latest_item.find("title").text
+            link = latest_item.find("link").text
+            
+            # Common keywords indicating a system-breaking change
+            if any(word in title.lower() for word in ["intervention", "required", "manual", "breaking"]):
+                print(f"\n{RED}{BOLD}⚠️  ATTENTION: IMPORTANT NEWS DETECTED{RESET}")
+                print(f"{YELLOW}Title: {title}{RESET}")
+                print(f"{CYAN}Read more: {link}{RESET}")
+                confirm = input(f"\n{BOLD}Have you read the news and wish to proceed? [y/N]: {RESET}").lower()
+                return confirm == 'y'
+            else:
+                print(f"{GREEN}✅ No urgent manual interventions found.{RESET}")
+                return True
+    except Exception:
+        print(f"{YELLOW}[!] Could not reach Arch News. Proceeding with caution...{RESET}")
+        return True
 
 def check_lock():
     if os.path.isfile("/var/lib/pacman/db.lck"):
@@ -132,7 +161,16 @@ def main():
     if action == "install":
         run_poli_process(["-S"] + sys.argv[2:], "Your package is ready!", is_install=True)
     elif action == "update":
-        run_poli_process(["-Syu"], "Your system has been updated, remember to restart if needed.")
+        # New: Check news BEFORE starting the update process
+        if check_arch_news():
+            print(f"{CYAN}Checking your system for orphans...{RESET}")
+            run_poli_process(["-Syu"], "System up to date!")
+            # Check for orphans after
+            orphans = subprocess.run(["pacman", "-Qqdt"], capture_output=True, text=True).stdout
+            if orphans:
+                print(f"\n{YELLOW}I found unused packages (orphans). Run 'poli orphans' to find them a home.{RESET}")
+        else:
+            print(f"{YELLOW}Update cancelled, so you can check the news.{RESET}")t if needed.")
     elif action == "orphans":
         subprocess.run("sudo pacman -Rs $(pacman -Qqdt)", shell=True)
     else:
