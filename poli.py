@@ -8,8 +8,8 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 import pty
+import signal
 
-# colours because you need them in life
 CYAN = "\033[36m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
@@ -21,34 +21,41 @@ SHOW_CURSOR = "\033[?25h"
 
 SPINNER = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
 
-def check_arch_news():
-    print(f"{CYAN}📡 Checking Arch Linux News for manual interventions...{RESET}")
-    news_url = "https://archlinux.org/feeds/news/"
-    try:
-        with urllib.request.urlopen(news_url, timeout=5) as response:
-            tree = ET.parse(response)
-            root = tree.getroot()
-            latest_item = root.find(".//item")
-            title = latest_item.find("title").text
-            link = latest_item.find("link").text
-            
-            if any(word in title.lower() for word in ["intervention", "required", "manual", "breaking"]):
-                print(f"\n{RED}{BOLD}⚠️  ATTENTION: IMPORTANT NEWS DETECTED{RESET}")
-                print(f"{YELLOW}Title: {title}{RESET}")
-                print(f"{CYAN}Read more: {link}{RESET}")
-                confirm = input(f"\n{BOLD}Have you read the news and wish to proceed? [y/N]: {RESET}").lower()
-                return confirm == 'y'
-            else:
-                print(f"{GREEN}✅ No urgent manual interventions found.{RESET}")
-                return True
-    except Exception:
-        print(f"{YELLOW}[!] Could not reach Arch News. Proceeding with caution...{RESET}")
-        return True
+def signal_handler(sig, frame):
+    sys.stdout.write(f"\r{YELLOW} [!] Interrupted. Assembly stopped.{RESET}\n")
+    sys.stdout.write(SHOW_CURSOR)
+    os._exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+
+def print_package_table(packages):
+    proc = subprocess.run(["pacman", "-Sp", "--print-format", "%n"] + packages, 
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        return
+
+    deps = proc.stdout.strip().split('\n')
+    total_bytes = 0.0
+
+    print(f"\n{BOLD}Dependencies:{RESET}")
+    for dep in deps:
+        size_proc = subprocess.run(["pacman", "-Si", dep], capture_output=True, text=True)
+        match = re.search(r"Installed Size\s+:\s+([\d\.]+)\s+(\w+)", size_proc.stdout)
+        if match:
+            val, unit = float(match.group(1)), match.group(2)
+            if unit == "KiB": total_bytes += val / 1024
+            elif unit == "MiB": total_bytes += val
+            elif unit == "GiB": total_bytes += val * 1024
+        
+        print(f"  {CYAN}○{RESET} {dep}")
+
+    print(f"\n{BOLD}Total install size:{RESET}")
+    print(f"{GREEN}{total_bytes:.2f} MiB{RESET}\n")
 
 def check_lock():
     if os.path.isfile("/var/lib/pacman/db.lck"):
         print(f"{YELLOW}[!] Stop! poli's locked by something else. Check other pacman processes.{RESET}")
-        sys.exit(1)
+        os._exit(0)
 
 def show_help():
     print(rf"{CYAN}{BOLD}")
@@ -58,11 +65,11 @@ def show_help():
     print(r" / ____/ /_/ / /____/ /   ")
     print(r"/_/    \____/_____/___/   ")
     print(f"{RESET}")
-    print(f"{YELLOW}{BOLD}Commands:{RESET}")
+    print(f"{YELLOW}{BOLD}What you can do:{RESET}")
     print(f"  {CYAN}update{RESET}          - Updates packages & checks for orphans")
     print(f"  {CYAN}search <query>{RESET}  - Search for a package")
-    print(f"  {CYAN}install <pkg>{RESET}  - Installs a package")
-    print(f"  {CYAN}remove <pkg>{RESET}   - Uninstalls/Removes a package")
+    print(f"  {CYAN}install <pkg>{RESET}   - Installs a package")
+    print(f"  {CYAN}remove <pkg>{RESET}    - Uninstalls/Removes a package")
     print(f"  {CYAN}orphans{RESET}         - Clean unused dependencies")
 
 def draw_poli_ui(status, percent, start_time):
@@ -85,10 +92,8 @@ def draw_poli_ui(status, percent, start_time):
 
 def search_package(query):
     print(f"{CYAN}Searching for '{query}'...{RESET}\n")
-    # -Ss searches the sync databases
     result = subprocess.run(["pacman", "-Ss", query], capture_output=True, text=True)
     if result.stdout:
-        # We split the output to make it look a bit cleaner
         lines = result.stdout.split('\n')
         for line in lines:
             if "/" in line:
@@ -96,9 +101,14 @@ def search_package(query):
             else:
                 print(f"  {line}")
         
-        target = input(f"\n{BOLD}Found something? Type package name to install (or Enter to skip): {RESET}").strip()
-        if target:
-            run_poli_process(["-S", target], "Package assembled and installed.")
+        try:
+            target = input(f"\n{BOLD}Found something? Type package name to install (or Enter to skip): {RESET}").strip()
+            if target:
+                run_poli_process(["-S", target], "Package assembled and installed.")
+        except KeyboardInterrupt:
+            print(f"\n{YELLOW}Search cancelled.{RESET}")
+            sys.exit(0)
+            return
     else:
         print(f"{RED}'{query}' doesn't exist in this land.{RESET}")
 
@@ -131,7 +141,6 @@ def run_poli_process(command, success_msg):
 
                     draw_poli_ui(current_status, current_pct, start_time)
             except OSError:
-                # This catches the Errno 5 when pacman finishes and closes the pty
                 pass
 
         process.wait()
@@ -153,23 +162,47 @@ def main():
         show_help()
         return
 
+def main():
+    if len(sys.argv) < 2:
+        show_help()
+        return
+
     action = sys.argv[1]
+
     if action == "install":
-        run_poli_process(["-S"] + sys.argv[2:], "Package assembled!")
+        pkgs = sys.argv[2:]
+        if not pkgs:
+            print(f"{RED}No packages specified.{RESET}")
+            return
+        
+        print_package_table(pkgs)
+        
+        confirm = input(f"\n{BOLD}Proceed with assembly? [Y/n]: {RESET}").lower()
+        if confirm in ['', 'y', 'yes']:
+            run_poli_process(["-S"] + pkgs, "Package assembled!")
+        else:
+            print(f"{YELLOW}Assembly cancelled.{RESET}")
+
     elif action == "remove":
-        run_poli_process(["-Rs"] + sys.argv[2:], "Package disassembled and cleaned.")
+        run_poli_process(["-Rs"] + sys.argv[2:], "Package disassembled.")
+
     elif action == "search":
         if len(sys.argv) > 2:
             search_package(sys.argv[2])
         else:
             print(f"{YELLOW}What should I search for? Usage: poli search <query>{RESET}")
+
     elif action == "update":
-        if check_arch_news():
-            run_poli_process(["-Syu"], "System updated. Remember to restart your PC.")
+        run_poli_process(["-Syu"], "System updated.")
+
     elif action == "orphans":
         subprocess.run("sudo pacman -Rs $(pacman -Qqdt)", shell=True)
     else:
         show_help()
-
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.stdout.write(f"\n{YELLOW} [!] Interrupted. Assembly stopped.{RESET}\n")
+        sys.stdout.write(SHOW_CURSOR)
+        os._exit(0)
