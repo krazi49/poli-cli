@@ -1,42 +1,53 @@
 # poli-cli
-poli-cli is a pacman wrapper for Arch Linux. What sets this apart from other wrappers is that this is pure Python.
+poli-cli is a powerful, minimalist `pacman` wrapper for Arch and Arch-based distributions written in pure Python. 
 
-This project was made for people who prefer apt, but don't want to deal with the endless garbled letters that go after "pacman". It combines the large library of the AUR, with the simple commands of apt.
+## Key features
 
- - Adds a triple-line UI, made up of a spinner, a bar and the status
- - Adds a safety net for low-end, low storage computers with a bold red download string if the package exceeds 500MB
- - Adds a feature that tells you if orphaned packages are installed, and a command to remove them simpler than pacman
- - Checks the archlinux.org page for news on packages that need manual intervention before a system update
- - Has a "verbose mode" for people who need to see all information
+### Hybrid repository support
+poli automatically detects if a package is in the official repositories or the AUR. You no longer need to switch between `pacman` and a separate AUR helper.
 
-poli uses apt-like commands seen below:
+### AUR solver
+Unlike simple wrappers, **poli** can solve complex dependency trees. If an AUR package depends on another AUR package, poli will map the entire chain and build them in the correct logical order.
 
-`poli install <pkg>`
-**Assemble**
-Fetches and installs a package with live ETA.
+### APT parity
+poli mirrors the behavior of the apt package manager while keeping some pacman functionality.
+- Works as `poli`.
+- Supports `get`, `update`, `search`, and `orphans` aliases.
+
+## Commands
+
+`poli get <pkg>`
+**Assemble** Fetches and installs a package with a live terminal UI and ETA. If the package isn't in official repos, it automatically switches to AUR mode.
 
 `poli update`
-**Update packages on your PC**
-Checks Arch News for any needed upgrades, finds orphaned packages and updates system.
+**System update** Performs a full system upgrade (`-Syu`) and then automatically scans your installed AUR packages for available updates.
 
 `poli search <term>`
-**Find and install**
-Interactive search with selection.
+**Find and install** Searches both the official repositories and the AUR. AUR results are highlighted for clarity.
+
+`poli remove <pkg>`
+**Disassemble** Uninstalls a package and removes its dependencies.
 
 `poli orphans`
-**Remove orphans**
-Lists and removes unused dependencies to save space.
+**De-bloat** Lists and removes unused dependencies to keep your system lean and fast.
 
-`poli --verbose`
-**Debug**
-Bypasses the UI to show raw `pacman` output.
+`poli help`
+**Assembly manual** Displays the built-in help menu with a full list of actions and usage examples.
 
-### Installation
-Install  poli-cli easily in your terminal with an install script.
-``git clone https://github.com/krazi49/poli-cli.git``
-``cd poli-cli``
-``chmod +x install.sh``
-``./install.sh``
+## Installation
 
-Or, if you want a quick one-line command, use this:
-``bash curl -sO [https://raw.githubusercontent.com/krazi49/poli-cli/main/install.sh](https://raw.githubusercontent.com/krazi49/poli-cli/main/install.sh) && chmod +x install.sh && ./install.sh``
+### Manually
+Run:
+```bash
+git clone https://github.com/krazi49/poli-cli.git
+cd poli-cli
+chmod +x install.sh
+./install.sh
+```
+
+### Quickly
+Paste:
+```bash
+curl -sO https://raw.githubusercontent.com/krazi49/poli-cli/main/install.sh && chmod +x install.sh && ./install.sh
+```
+and press enter.

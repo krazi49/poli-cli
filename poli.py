@@ -6,203 +6,209 @@ import re
 import itertools
 import time
 import urllib.request
-import xml.etree.ElementTree as ET
+import json
+import shutil
 import pty
 import signal
 
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-RESET = "\033[0m"
-BOLD = "\033[1m"
-HIDE_CURSOR = "\033[?25l"
-SHOW_CURSOR = "\033[?25h"
-
+CYAN, GREEN, YELLOW, RED = "\033[36m", "\033[32m", "\033[33m", "\033[31m"
+RESET, BOLD, MAGENTA = "\033[0m", "\033[1m", "\033[35m"
+HIDE_CURSOR, SHOW_CURSOR = "\033[?25l", "\033[?25h"
 SPINNER = itertools.cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
 
 def signal_handler(sig, frame):
-    sys.stdout.write(f"\r{YELLOW} [!] Interrupted. Assembly stopped.{RESET}\n")
+    sys.stdout.write(f"\r{YELLOW} [!] Interrupted. Cleaning up...{RESET}\n")
     sys.stdout.write(SHOW_CURSOR)
     os._exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)
+-
+def query_aur(params):
+    url = f"https://aur.archlinux.org/rpc/?v=5&{params}"
+    try:
+        with urllib.request.urlopen(url) as response:
+            return json.loads(response.read().decode()).get('results', [])
+    except: return []
 
-def print_package_table(packages):
-    proc = subprocess.run(["pacman", "-Sp", "--print-format", "%n"] + packages, 
-                          capture_output=True, text=True)
-    if proc.returncode != 0:
+def get_aur_info(pkg_names):
+    if not pkg_names: return []
+    query = "&".join([f"arg[]={name}" for name in pkg_names])
+    return query_aur(f"type=info&{query}")
+
+def resolve_deps(pkg_name, build_queue=None, visited=None):
+    """Recursively finds AUR dependencies that aren't in official repos."""
+    if build_queue is None: build_queue = []
+    if visited is None: visited = set()
+    
+    if pkg_name in visited: return build_queue
+    visited.add(pkg_name)
+
+    if subprocess.run(["pacman", "-Si", pkg_name], capture_output=True).returncode == 0:
+        return build_queue
+
+    info = get_aur_info([pkg_name])
+    if not info: return build_queue
+
+    pkg_data = info[0]
+    deps = pkg_data.get('Depends', []) + pkg_data.get('MakeDepends', [])
+    
+    for dep in deps:
+        clean_dep = re.split('[>=<]', dep)[0]
+        resolve_deps(clean_dep, build_queue, visited)
+
+    if pkg_name not in build_queue:
+        build_queue.append(pkg_name)
+    return build_queue
+
+def install_package(pkg_name):
+    """Decides whether to use pacman or the recursive AUR builder."""
+    if subprocess.run(["pacman", "-Si", pkg_name], capture_output=True).returncode == 0:
+        run_poli_process(["-S", pkg_name], f"{pkg_name} assembled.")
         return
 
-    deps = proc.stdout.strip().split('\n')
-    total_bytes = 0.0
+    print(f"{CYAN}🔍 Solving AUR dependencies for {BOLD}{pkg_name}{RESET}...")
+    queue = resolve_deps(pkg_name)
+    
+    if not queue:
+        print(f"{RED}[!] Could not find {pkg_name} anywhere.{RESET}")
+        return
 
-    print(f"\n{BOLD}Dependencies:{RESET}")
-    for dep in deps:
-        size_proc = subprocess.run(["pacman", "-Si", dep], capture_output=True, text=True)
-        match = re.search(r"Installed Size\s+:\s+([\d\.]+)\s+(\w+)", size_proc.stdout)
-        if match:
-            val, unit = float(match.group(1)), match.group(2)
-            if unit == "KiB": total_bytes += val / 1024
-            elif unit == "MiB": total_bytes += val
-            elif unit == "GiB": total_bytes += val * 1024
-        
-        print(f"  {CYAN}○{RESET} {dep}")
+    print(f"{YELLOW}Assembly order: {' -> '.join(queue)}{RESET}")
+    for target in queue:
+        build_aur(target)
 
-    print(f"\n{BOLD}Total install size:{RESET}")
-    print(f"{GREEN}{total_bytes:.2f} MiB{RESET}\n")
-
-def check_lock():
-    if os.path.isfile("/var/lib/pacman/db.lck"):
-        print(f"{YELLOW}[!] Stop! poli's locked by something else. Check other pacman processes.{RESET}")
-        os._exit(0)
-
-def show_help():
-    print(rf"{CYAN}{BOLD}")
-    print(r"  ____  ____  __    ____ ")
-    print(r" / __ \/ __ \/ /    /  _/")
-    print(r" / /_/ / / / / /     / /  ")
-    print(r" / ____/ /_/ / /____/ /   ")
-    print(r"/_/    \____/_____/___/   ")
-    print(f"{RESET}")
-    print(f"{YELLOW}{BOLD}What you can do:{RESET}")
-    print(f"  {CYAN}update{RESET}          - Updates packages & checks for orphans")
-    print(f"  {CYAN}search <query>{RESET}  - Search for a package")
-    print(f"  {CYAN}install <pkg>{RESET}   - Installs a package")
-    print(f"  {CYAN}remove <pkg>{RESET}    - Uninstalls/Removes a package")
-    print(f"  {CYAN}orphans{RESET}         - Clean unused dependencies")
+def build_aur(pkg_name):
+    build_dir = f"/tmp/poli_{pkg_name}"
+    try:
+        if os.path.exists(build_dir): shutil.rmtree(build_dir)
+        subprocess.run(["git", "clone", "--quiet", f"https://aur.archlinux.org/{pkg_name}.git", build_dir], check=True)
+        subprocess.run(["makepkg", "-sirc", "--noconfirm"], cwd=build_dir, check=True)
+    except:
+        print(f"{RED}❌ Failed to build {pkg_name}{RESET}")
+    finally:
+        if os.path.exists(build_dir): shutil.rmtree(build_dir)
 
 def draw_poli_ui(status, percent, start_time):
     elapsed = time.time() - start_time
-    if percent > 0:
-        total_est = elapsed / (percent / 100)
-        remaining = max(0, total_est - elapsed)
-        mins, secs = divmod(int(remaining), 60)
-        eta_str = f"{mins:02d}:{secs:02d}"
-    else:
-        eta_str = "--:--"
-
-    bar_anim = ["░▒▓", "▒▓▒", "▓▒░", "█▓▒"]
-    speed_bar = bar_anim[int(time.time() * 5) % 4] * 4
-
-    sys.stdout.write(f"\r{CYAN}{next(SPINNER)} poli is assembling...{RESET} {BOLD}↳{RESET} {status[:40]}\033[K\n")
-    sys.stdout.write(f"\r{YELLOW}[{speed_bar}] {percent}% {RESET} | {CYAN}ETA:{RESET} {eta_str}\033[K")
+    eta = f"{int(elapsed / (percent/100) - elapsed)}s" if percent > 0 else "--"
+    sys.stdout.write(f"\r{CYAN}{next(SPINNER)} poli is assembling...{RESET} {BOLD}↳{RESET} {status[:30]}\033[K\n")
+    sys.stdout.write(f"\r{YELLOW}█▓▒░ {percent}% {RESET} | {CYAN}ETA:{RESET} {eta}\033[K")
     sys.stdout.write("\033[A") 
     sys.stdout.flush()
 
-def search_package(query):
-    print(f"{CYAN}Searching for '{query}'...{RESET}\n")
-    result = subprocess.run(["pacman", "-Ss", query], capture_output=True, text=True)
-    if result.stdout:
-        lines = result.stdout.split('\n')
-        for line in lines:
-            if "/" in line:
-                print(f"{CYAN}{BOLD}{line}{RESET}")
-            else:
-                print(f"  {line}")
-        
-        try:
-            target = input(f"\n{BOLD}Found something? Type package name to install (or Enter to skip): {RESET}").strip()
-            if target:
-                run_poli_process(["-S", target], "Package assembled and installed.")
-        except KeyboardInterrupt:
-            print(f"\n{YELLOW}Search cancelled.{RESET}")
-            sys.exit(0)
-            return
-    else:
-        print(f"{RED}'{query}' doesn't exist in this land.{RESET}")
-
 def run_poli_process(command, success_msg):
-    check_lock()
     sys.stdout.write(HIDE_CURSOR)
-    start_time = time.time()
-    current_pct = 0
-    current_status = "Processing..."
-    error_log = []
-
+    start_time, current_pct, current_status = time.time(), 0, "Processing..."
     try:
         master_fd, slave_fd = pty.openpty()
-        full_cmd = ["sudo", "pacman", "--noconfirm"] + command
-        
-        process = subprocess.Popen(full_cmd, stdout=slave_fd, stderr=slave_fd, text=True)
+        process = subprocess.Popen(["sudo", "pacman", "--noconfirm"] + command, stdout=slave_fd, stderr=slave_fd, text=True)
         os.close(slave_fd)
-        
         with os.fdopen(master_fd, 'r') as pipe:
             try:
                 for line in pipe:
-                    error_log.append(line)
-                    pct_match = re.search(r'(\d+)%', line)
-                    if pct_match:
-                        current_pct = int(pct_match.group(1))
-                    
-                    keys = ["cloning", "building", "installing", "checking", "downloading", "removing", "upgrading"]
-                    if any(k in line.lower() for k in keys):
+                    if '%' in line:
+                        match = re.search(r'(\d+)%', line)
+                        if match: current_pct = int(match.group(1))
+                    if any(k in line.lower() for k in ["installing", "downloading", "upgrading"]):
                         current_status = line.strip().split('::')[-1].split('..')[0].strip()
-
                     draw_poli_ui(current_status, current_pct, start_time)
-            except OSError:
-                pass
-
+            except OSError: pass
         process.wait()
         sys.stdout.write(f"\r\033[K\n\r\033[K\033[A{SHOW_CURSOR}")
-        
-        if process.returncode == 0:
-            print(f"\n{GREEN}✅ {success_msg} ({int(time.time() - start_time)}s){RESET}")
-        else:
-            print(f"\n{RED}{BOLD}[!] Couldn't do what you asked, sorry. This error may help:{RESET}")
-            for err_line in error_log[-5:]:
-                print(f" {RED}»{RESET} {err_line.strip()}")
-    except KeyboardInterrupt:
-        print(f"\n{SHOW_CURSOR}{BOLD}[!] Stopped.{RESET}")
-    finally:
-        sys.stdout.write(SHOW_CURSOR)
+        if process.returncode == 0: print(f"\n{GREEN}✅ {success_msg}{RESET}")
+    finally: sys.stdout.write(SHOW_CURSOR)
+
+def search(query):
+    subprocess.run(["pacman", "-Ss", query])
+    results = query_aur(f"type=search&arg={query}")
+    if results:
+        print(f"\n{BOLD}{MAGENTA}--- AUR ---{RESET}")
+        for p in results[:10]:
+            print(f"{MAGENTA}{p['Name']}{RESET} {GREEN}{p['Version']}{RESET}\n  {p.get('Description','')}")
+
+def aur_upgrade():
+    """Checks for updates for all installed AUR packages."""
+    print(f"{CYAN}Checking AUR for updates...{RESET}")
+    local = subprocess.run(["pacman", "-Qm"], capture_output=True, text=True).stdout.strip().split('\n')
+    pkgs = [l.split()[0] for l in local if l]
+    
+    remote_data = get_aur_info(pkgs)
+    remote_versions = {p['Name']: p['Version'] for p in remote_data}
+    local_versions = {l.split()[0]: l.split()[1] for l in local if l}
+
+    updates = []
+    for name, v_remote in remote_versions.items():
+        if v_remote != local_versions.get(name):
+            updates.append(name)
+
+    if not updates:
+        print(f"{GREEN}All AUR packages are up to date.{RESET}")
+        return
+
+    print(f"{YELLOW}Updates found: {', '.join(updates)}{RESET}")
+    for u in updates:
+        install_package(u)
+
+def show_help():
+    print(f"{YELLOW}{BOLD}Usage:{RESET}")
+    print(f"  poli <action> [arguments]")
+    print(f"\n{YELLOW}{BOLD}Actions:{RESET}")
+    
+    help_items = [
+        ("get <pkg>", "Install packages from official repos or AUR"),
+        ("search <query>", "Search for packages across all repositories"),
+        ("update", "Full system upgrade (Pacman + AUR)"),
+        ("remove <pkg>", "Disassemble (remove) a package and its dependencies"),
+        ("orphans", "Clean up unused dependencies (bloat)"),
+        ("help", "Show this assembly manual")
+    ]
+
+    for action, desc in help_items:
+        print(f"  {CYAN}{action:<18}{RESET} - {desc}")
 
 def main():
     if len(sys.argv) < 2:
         show_help()
         return
-
-def main():
-    if len(sys.argv) < 2:
-        show_help()
-        return
-
-    action = sys.argv[1]
-
-    if action == "install":
-        pkgs = sys.argv[2:]
-        if not pkgs:
-            print(f"{RED}No packages specified.{RESET}")
-            return
         
-        print_package_table(pkgs)
-        
-        confirm = input(f"\n{BOLD}Proceed with assembly? [Y/n]: {RESET}").lower()
-        if confirm in ['', 'y', 'yes']:
-            run_poli_process(["-S"] + pkgs, "Package assembled!")
-        else:
-            print(f"{YELLOW}Assembly cancelled.{RESET}")
-
-    elif action == "remove":
-        run_poli_process(["-Rs"] + sys.argv[2:], "Package disassembled.")
-
-    elif action == "search":
-        if len(sys.argv) > 2:
-            search_package(sys.argv[2])
-        else:
-            print(f"{YELLOW}What should I search for? Usage: poli search <query>{RESET}")
-
-    elif action == "update":
-        run_poli_process(["-Syu"], "System updated.")
-
-    elif action == "orphans":
-        subprocess.run("sudo pacman -Rs $(pacman -Qqdt)", shell=True)
-    else:
-        show_help()
-if __name__ == "__main__":
     try:
-        main()
-    except KeyboardInterrupt:
-        sys.stdout.write(f"\n{YELLOW} [!] Interrupted. Assembly stopped.{RESET}\n")
-        sys.stdout.write(SHOW_CURSOR)
-        os._exit(0)
+        subprocess.run(["sudo", "-v"], check=True)
+    except subprocess.CalledProcessError:
+        print(f"{RED}[!] Sudo authorization failed.{RESET}")
+        return
+    
+    cmd = sys.argv[1].lower()
+    args = sys.argv[2:]
+
+    if cmd in ["help", "--help", "-h"]:
+        show_help()
+    elif cmd == "get":
+        if not args:
+            print(f"{RED}Specify packages to get.{RESET}")
+        else:
+            for p in args: install_package(p)
+    elif cmd == "search":
+        if not args:
+            print(f"{YELLOW}usage: poli search <query>{RESET}")
+        else:
+            search(args[0])
+    elif cmd == "update":
+        run_poli_process(["-Syu"], "System updated.")
+        aur_upgrade()
+    elif cmd == "remove":
+        if not args:
+            print(f"{RED}Specify packages to remove.{RESET}")
+        else:
+            run_poli_process(["-Rs"] + args, "Packages disassembled.")
+    elif cmd == "orphans":
+        orphans = subprocess.run(["pacman", "-Qqdt"], capture_output=True, text=True).stdout.strip()
+        if orphans:
+            run_poli_process(["-Rs"] + orphans.split(), "System cleaned.")
+        else:
+            print(f"{GREEN}No orphans found. System is lean.{RESET}")
+    else:
+        print(f"{RED}Unknown command: {cmd}{RESET}")
+        show_help()
+        
+if __name__ == "__main__":
+    main()
