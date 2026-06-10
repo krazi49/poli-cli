@@ -7,7 +7,7 @@ RED='\033[31m'
 RESET='\033[0m'
 BOLD='\033[1m'
 
-echo -e "${CYAN}${BOLD}Installing poli for the first time...${RESET}"
+echo -e "${CYAN}${BOLD}Installing poli-cli for the first time...${RESET}"
 
 # 1. Check if the main script exists
 if [[ ! -f "poli.py" ]]; then
