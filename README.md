@@ -1,44 +1,44 @@
 # poli-cli
 
-An apt-like pacman wrapper for Arch Linux with AUR support. Pure Python.
+pacman wrapper made entirely with python
 
-This project was made for people who prefer apt, but don't want to deal with the endless garbled letters that go after "pacman". It combines the large library of the AUR, with the simple commands of apt.
+now, you can talk to pacman like you do apt, `poli` comes with aliases and a search tool, built to help you install packages faster. not that you weren't fast with yay or paru anyway
 
-## Features
+## it comes with
 
-- Live progress bar with ETA during installs
-- AUR dependency resolution and auto-build
-- `why` — find which package owns a file
-- `tree` — dependency tree visualization
-- `stats` — system package statistics
-- `check` — verify package integrity
-- `log` — recent package operations
-- Orphan cleanup, reinstall, download-only, and more
+- eta and progress bar
+- dependency resolution from the aur + aur support
+- dependency tree visualization through `tree`
+- system package statistics through `stats`
+- verify package integrity with `check`
+- and a `log` of recent package operations
+- you can also clean up orphans, reinstall packages, and more below
 
-## Commands
+## how do i use it?
 
-poli uses apt-like commands. Factory names on the left, canonical names in parens:
+same structure as apt, `poli + [command] + (package)`, 
+so to install neovim, you'd
+`poli assemble neovim`
 
-| Command | Description |
+| command | what it does |
 |---------|-------------|
-| `assemble` (`get`) | Install packages from repos or AUR |
-| `catalog` (`search`) | Search packages across all repos |
-| `maintain` (`update`) | Full system upgrade |
-| `disassemble` (`remove`) | Remove packages and orphans |
-| `blueprint` (`info`) | Show detailed package info |
-| `reforge` (`reinstall`) | Force rebuild and reinstall |
-| `why` | Which package owns a file? |
-| `tree` | Dependency tree for a package |
-| `fetch` (`download`) | Download without installing |
-| `audit` (`check`) | Verify package integrity |
-| `floorplan` (`stats`) | System package statistics |
-| `scrapheap` (`orphans`) | Clean up unused deps |
-| `history` (`log`) | Recent package operations |
+| `assemble` (`get`) | install packages from repos the aur |
+| `catalog` (`search`) | search packages across everything |
+| `maintain` (`update`) | updates everything |
+| `disassemble` (`remove`) | gets rid of packages and orphans |
+| `blueprint` (`info`) | detailed info on a package |
+| `reforge` (`reinstall`) | force rebuild and install |
+| `why` | see which packages own this package |
+| `tree` | dependency trees for a package |
+| `fetch` (`download`) | download without installing |
+| `audit` (`check`) | verify package integrity |
+| `floorplan` (`stats`) | system package statistics |
+| `scrapheap` (`orphans`) | clean up unused deps |
+| `history` (`log`) | see recent package operations |
 
-### Examples
+### more examples...
 
 ```bash
-poli assemble neovim          # install neovim
 poli catalog 'web browser'    # search for browsers
 poli why /usr/bin/nvim        # which package owns this?
 poli tree neovim              # show dependency tree
@@ -46,9 +46,7 @@ poli maintain                 # full system upgrade
 poli floorplan                # system stats
 ```
 
-## Installation
-
-### From source
+## to install it, just do this
 
 ```bash
 git clone https://github.com/krazi49/poli-cli.git
@@ -57,28 +55,24 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### From AUR
+## development, if you care enough
 
-Once published: `poli assemble poli-cli`
-
-## Development
-
-The package lives in `poli/`:
+whole thing's in `poli/`, like this:
 
 ```
 poli/
-├── __init__.py    # version
-├── __main__.py    # entrypoint
-├── cli.py         # argument routing & dispatch
-├── aur.py         # AUR RPC + dep resolution
-├── pacman.py      # pacman wrapper + AUR builds
-├── display.py     # colors, progress bar, tables
-├── config.py      # config loading
-├── stats.py       # system stats & diagnostics
-├── tree.py        # dependency tree
-└── why.py         # file → package ownership
+├── __init__.py
+├── __main__.py
+├── cli.py
+├── aur.py
+├── pacman.py
+├── display.py
+├── config.py
+├── stats.py
+├── tree.py
+└── why.py
 ```
 
-## License
+## license
 
 MIT
