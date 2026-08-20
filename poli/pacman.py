@@ -12,14 +12,90 @@ from .aur import resolve_deps, get_aur_info
 from .config import load
 
 
+"""Pacman wrapper with clean progress display and AUR build support."""
+import os
+import pty
+import re
+import select
+import shutil
+import subprocess
+import sys
+import time
+from .display import (
+    log_error, ProgressBar, CYAN, GREEN, YELLOW, RED, BOLD, RESET,
+)
+from .aur import resolve_deps, get_aur_info, aur_upgrade
+from .config import load
+
+
+class PacmanStreamParser:
+    """Parses incoming pacman output from PTY to update progress and emit terminal logs."""
+
+    def __init__(self, progress_bar):
+        self.prog = progress_bar
+        self.buffer = ""
+
+    def feed(self, data):
+        self.buffer += data
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            self._process_line(line, is_complete=True)
+        if self.buffer:
+            self._process_line(self.buffer, is_complete=False)
+
+    def flush(self):
+        if self.buffer:
+            self._process_line(self.buffer, is_complete=True)
+            self.buffer = ""
+
+    def _process_line(self, line, is_complete=False):
+        if "\r" in line:
+            parts = line.split("\r")
+            for part in parts:
+                self._parse_progress(part)
+        else:
+            self._parse_progress(line)
+
+        if is_complete:
+            cleaned = self._clean_line(line)
+            if cleaned:
+                self.prog.print_log(f"  {cleaned}\n")
+
+    def _parse_progress(self, text):
+        pct = None
+        m = re.search(r"(\d+)%", text)
+        if m:
+            pct = int(m.group(1))
+
+        status = text
+        status = re.sub(r"\s*\[[#=\-·\s\u00b7]*\]\s*", " ", status)
+        status = re.sub(r"\s*\d+%\s*", " ", status)
+        status = status.strip()
+
+        if status or pct is not None:
+            self.prog.update(pct=pct, status=status if status else None)
+
+    def _clean_line(self, line):
+        if "\r" in line:
+            line = line.split("\r")[-1]
+        line = line.strip()
+        if not line:
+            return None
+
+        cleaned = re.sub(r"\s*\[[#=\-·\s\u00b7]*\]\s*", " ", line)
+        cleaned = re.sub(r"\s*\d+%\s*", " ", cleaned)
+        cleaned = cleaned.strip()
+
+        return cleaned if cleaned else None
+
+
 def run_pacman(command, success_msg):
-    """Run pacman with live progress. Uses pty so pacman streams progress."""
+    """Run pacman with live progress and terminal log output via PTY."""
     prog = ProgressBar()
     prog.start()
-    pct, status = 0, "Processing..."
+    parser = PacmanStreamParser(prog)
 
     try:
-        import pty, select, os
         master_fd, slave_fd = pty.openpty()
         proc = subprocess.Popen(
             ["sudo", "pacman", "--noconfirm"] + command,
@@ -27,42 +103,43 @@ def run_pacman(command, success_msg):
         )
         os.close(slave_fd)
 
-        poller = select.poll()
-        poller.register(master_fd, select.POLLIN | select.POLLHUP | select.POLLERR)
         deadline = time.time() + 600
 
         while True:
-            remaining = max(0, int((deadline - time.time()) * 1000))
-            events = poller.poll(remaining)
-            if not events:
-                log_error("pacman timed out")
-                proc.kill()
-                break
-            for fd, ev in events:
-                if ev & (select.POLLHUP | select.POLLERR):
-                    break
-            else:
+            r, _, _ = select.select([master_fd], [], [], 0.1)
+            if master_fd in r:
                 try:
-                    line = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                    data = os.read(master_fd, 4096).decode("utf-8", errors="replace")
                 except OSError:
                     break
-                if not line:
+                if not data:
                     break
-                if "%" in line:
-                    m = re.search(r"(\d+)%", line)
-                    if m:
-                        pct = int(m.group(1))
-                for kw in ("installing", "downloading", "upgrading", "checking keys",
-                           "checking integrity", "loading package", "resolving dependencies"):
-                    if kw in line.lower():
-                        status = line.strip().split("::")[-1].split("..")[0].strip()
-                        break
-                prog.update(pct, status)
-                continue
-            break
+                parser.feed(data)
+            else:
+                if proc.poll() is not None:
+                    break
+                if time.time() > deadline:
+                    log_error("pacman timed out")
+                    proc.kill()
+                    break
 
+        try:
+            while True:
+                r, _, _ = select.select([master_fd], [], [], 0.05)
+                if master_fd in r:
+                    data = os.read(master_fd, 4096).decode("utf-8", errors="replace")
+                    if not data:
+                        break
+                    parser.feed(data)
+                else:
+                    break
+        except OSError:
+            pass
+
+        parser.flush()
         proc.wait()
         os.close(master_fd)
+
         prog.finish(success_msg if proc.returncode == 0 else None)
         if proc.returncode != 0:
             log_error(f"pacman exited with code {proc.returncode}")
@@ -160,3 +237,6 @@ def upgrade_system(pkg_names=None):
             install_package(p)
     else:
         run_pacman(["-Syu"], "System updated.")
+        updates = aur_upgrade()
+        for u in updates:
+            install_package(u)

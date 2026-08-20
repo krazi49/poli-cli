@@ -131,11 +131,13 @@ def main():
         show_help()
         return
 
-    if not _ensure_sudo():
-        return
-
     cmd = sys.argv[1].lower()
     cmd = ALIASES.get(cmd, cmd)
+
+    if cmd not in NO_SUDO:
+        if not _ensure_sudo():
+            return
+
     args = sys.argv[2:]
 
     dispatch = {

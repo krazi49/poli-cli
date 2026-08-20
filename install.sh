@@ -1,40 +1,43 @@
 #!/bin/bash
+set -euo pipefail
 
-# Define colors for the conversational tone
-CYAN='\033[36m'
-GREEN='\033[32m'
-RED='\033[31m'
-RESET='\033[0m'
-BOLD='\033[1m'
+CYAN='\033[36m'; GREEN='\033[32m'; RED='\033[31m'; YELLOW='\033[33m'
+BOLD='\033[1m'; RESET='\033[0m'
 
-echo -e "${CYAN}${BOLD}Installing poli-cli...${RESET}"
+cd "$(dirname "$0")"
 
-# 1. Check if the package directory exists
-if [[ ! -d "poli" ]] || [[ ! -f "poli/__init__.py" ]]; then
-    echo -e "${RED}[!] The poli package isn't here. Try and clone the repository again.${RESET}"
-    exit 1
-fi
+# checks
+command -v python3 >/dev/null 2>&1 || { echo -e "${RED}[!] python3 not found${RESET}"; exit 1; }
+python3 -c "import sys; assert sys.version_info >= (3, 11)" 2>/dev/null || {
+    echo -e "${RED}[!] python3.11+ required (got $(python3 --version))${RESET}"; exit 1;
+}
+command -v pacman >/dev/null 2>&1 || { echo -e "${RED}[!] pacman not found — arch only${RESET}"; exit 1; }
 
-# 2. Install the package to /usr/local/lib
-echo -e "${CYAN}Installing poli package to /usr/local/lib...${RESET}"
-sudo rm -rf /usr/local/lib/poli
-sudo cp -r poli /usr/local/lib/poli
+[[ -d poli ]] || { echo -e "${RED}[!] poli/ directory not found in $(pwd)${RESET}"; exit 1; }
 
-# 3. Create the executable shim in /usr/local/bin
-echo -e "${CYAN}Creating poli command...${RESET}"
-sudo tee /usr/local/bin/poli > /dev/null << 'EOF'
+echo -e "${CYAN}${BOLD}Installing poli...${RESET}"
+
+# install package
+sudo install -d /usr/local/lib/poli
+sudo cp -r poli/__init__.py poli/__main__.py poli/aur.py poli/cli.py \
+            poli/config.py poli/display.py poli/pacman.py poli/stats.py \
+            poli/tree.py /usr/local/lib/poli/
+
+# install wrapper
+sudo tee /usr/local/bin/poli > /dev/null << 'POLI_EOF'
 #!/usr/bin/env bash
 export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}/usr/local/lib"
 exec python3 -m poli "$@"
-EOF
-sudo chmod +x /usr/local/bin/poli
+POLI_EOF
+sudo chmod 755 /usr/local/bin/poli
 
-# 4. Final Verification
-if [[ -f "/usr/local/bin/poli" ]] && [[ -f "/usr/local/lib/poli/__main__.py" ]]; then
-    echo -e "\n${GREEN}${BOLD}✅ Assembly complete!${RESET}"
-    echo -e "You can now run me by simply typing ${CYAN}poli${RESET} in your terminal."
-    echo -e "Try ${CYAN}poli update${RESET} to get started."
-else
-    echo -e "${RED}[!] Something went wrong during the copy process.${RESET}"
-    exit 1
-fi
+# config dir
+mkdir -p ~/.config/poli
+
+echo ""
+echo -e "${GREEN}${BOLD}✅ poli v3.0.0 assembled.${RESET}"
+echo -e "   package:  ${CYAN}/usr/local/lib/poli/${RESET}"
+echo -e "   wrapper:  ${CYAN}/usr/local/bin/poli${RESET}"
+echo -e "   config:   ${CYAN}~/.config/poli/${RESET}"
+echo ""
+echo -e "   Run ${CYAN}poli help${RESET} to get started."

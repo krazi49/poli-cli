@@ -21,18 +21,40 @@ def log_error(msg):
 
 
 class ProgressBar:
-    """Live two-line progress display — replaces the old pty hack."""
+    """Live two-line progress display with logging support."""
 
     def __init__(self):
         self.start_time = None
         self.pct = 0
         self.status = ""
+        self.active = False
 
     def start(self):
         self.start_time = time.time()
+        self.active = True
         sys.stderr.write(HIDE_CURSOR)
+        sys.stderr.flush()
+
+    def clear(self):
+        if not self.active:
+            return
+        sys.stderr.write("\r\033[K\n\r\033[K\033[A")
+        sys.stderr.flush()
+
+    def print_log(self, text):
+        """Print log text above the progress bar."""
+        if self.active:
+            self.clear()
+            sys.stdout.write(text)
+            sys.stdout.flush()
+            self.update()
+        else:
+            sys.stdout.write(text)
+            sys.stdout.flush()
 
     def update(self, pct=None, status=None):
+        if not self.active:
+            return
         if pct is not None:
             self.pct = pct
         if status is not None:
@@ -47,10 +69,14 @@ class ProgressBar:
         sys.stderr.flush()
 
     def finish(self, msg="done"):
-        sys.stderr.write(f"\r\033[K\033[A\033[K")
+        if not self.active:
+            return
+        self.clear()
+        self.active = False
         sys.stderr.write(SHOW_CURSOR)
         sys.stderr.flush()
-        print(f"{GREEN}✓ {msg}{RESET}")
+        if msg:
+            print(f"{GREEN}✓ {msg}{RESET}")
 
 
 def table(headers, rows, indent=2):
